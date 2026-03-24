@@ -738,8 +738,7 @@ footer {
 .rev-delay-4 { transition-delay: .32s; }
 
 /* Cursor */
-#cur,
-#cur-ring {
+#cur {
   position: fixed;
   top: 0;
   left: 0;
@@ -748,29 +747,19 @@ footer {
   transform: translate(-50%, -50%);
   z-index: 9501;
   mix-blend-mode: difference;
-  transition: opacity .18s ease, transform .18s ease, width .18s ease, height .18s ease;
+  transition: opacity .18s ease, width .18s ease, height .18s ease;
 }
 #cur {
   width: 11px;
   height: 11px;
   background: #fff;
 }
-#cur-ring {
-  width: 34px;
-  height: 34px;
-  border: 1px solid rgba(255,255,255,.7);
-}
-#cur.visible,
-#cur-ring.visible {
+#cur.visible {
   opacity: 1;
 }
 #cur.hover {
   width: 15px;
   height: 15px;
-}
-#cur-ring.hover {
-  width: 44px;
-  height: 44px;
 }
 
 @media (pointer: coarse) {
@@ -778,8 +767,7 @@ footer {
   body * {
     cursor: auto !important;
   }
-  #cur,
-  #cur-ring {
+  #cur {
     display: none;
   }
 }
@@ -789,7 +777,6 @@ footer {
 <body>
 
 <div id="cur"></div>
-<div id="cur-ring"></div>
 
 <!-- NAV -->
 <nav>
@@ -1083,46 +1070,27 @@ footer {
 <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
 // ── Cursor ──────────────────────────────────────────────────────────────────
 const cur = document.getElementById('cur');
-const curRing = document.getElementById('cur-ring');
-let mx = 0, my = 0, rx = 0, ry = 0;
+let mx = 0, my = 0;
 let cursorReady = false;
 
 document.addEventListener('mousemove', e => {
   mx = e.clientX; my = e.clientY;
   cur.style.left = mx + 'px'; cur.style.top = my + 'px';
   if(!cursorReady){
-    rx = mx; ry = my;
-    curRing.style.left = rx + 'px';
-    curRing.style.top  = ry + 'px';
     cur.classList.add('visible');
-    curRing.classList.add('visible');
     cursorReady = true;
   }
 });
 
-function animateRing() {
-  rx += (mx - rx) * 0.12;
-  ry += (my - ry) * 0.12;
-  curRing.style.left = rx + 'px';
-  curRing.style.top  = ry + 'px';
-  requestAnimationFrame(animateRing);
-}
-animateRing();
-
 document.querySelectorAll('a, button, .work-card, .svc-row').forEach(el => {
-  el.addEventListener('mouseenter', () => {
-    cur.classList.add('hover');
-    curRing.classList.add('hover');
-  });
+  el.addEventListener('mouseenter', () => cur.classList.add('hover'));
   el.addEventListener('mouseleave', () => {
     cur.classList.remove('hover');
-    curRing.classList.remove('hover');
   });
 });
 
 document.addEventListener('mouseleave', () => {
   cur.classList.remove('visible');
-  curRing.classList.remove('visible');
   cursorReady = false;
 });
 
@@ -1160,27 +1128,41 @@ const FS = `#version 300 es
 precision highp float;
 in vec2 uv; out vec4 o;
 uniform sampler2D vid, atl;
-uniform vec2 res;
+uniform vec2 res, vres;
 uniform float cell, nc, ex, att, bl;
 uniform vec3 fg, bg;
 float lm(vec3 c){ return .299*c.r+.587*c.g+.114*c.b; }
-vec3 gb(vec2 u, float s){
-  vec2 px=1./res; vec3 a=vec3(0.); float w=0.;
+vec2 coverUv(vec2 u){
+  float ra = res.x / res.y;
+  float va = vres.x / vres.y;
+  vec2 outUv = u;
+  if(ra > va){
+    float sy = va / ra;
+    outUv.y = (u.y - .5) * sy + .5;
+  } else {
+    float sx = ra / va;
+    outUv.x = (u.x - .5) * sx + .5;
+  }
+  return outUv;
+}
+vec3 gb(vec2 su, float s){
+  vec2 px=1./vres; vec3 a=vec3(0.); float w=0.;
   for(int x=-3;x<=3;x++) for(int y=-3;y<=3;y++){
     float g=exp(-float(x*x+y*y)/(2.*s*s));
-    a+=texture(vid,u+vec2(float(x),float(y))*px).rgb*g; w+=g;
+    a+=texture(vid,su+vec2(float(x),float(y))*px).rgb*g; w+=g;
   }
   return a/w;
 }
 void main(){
   vec2 cu=floor(uv*res/cell)*cell/res;
-  vec3 c=texture(vid,cu+cell*.5/res).rgb;
+  vec2 su=coverUv(cu+cell*.5/res);
+  vec3 c=texture(vid,su).rgb;
   float l=clamp(lm(c)*ex,0.,1.);
   float ci=floor(l*(nc-1.));
   vec2 cf=fract(uv*res/cell);
   float ga=texture(atl,vec2((ci+cf.x)/nc,cf.y)).r;
   vec3 px=mix(bg,fg*pow(l,att),ga);
-  if(bl>0.){ vec3 b=gb(uv,2.5); float d=length(b-bg); px+=fg*smoothstep(.04,.35,d)*bl*.5; }
+  if(bl>0.){ vec3 b=gb(coverUv(uv),2.5); float d=length(b-bg); px+=fg*smoothstep(.04,.35,d)*bl*.5; }
   o=vec4(clamp(px,0.,1.),1.);
 }`;
 
@@ -1238,6 +1220,7 @@ function frame(){
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,vTex);
   gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D,aTex);
   gl.uniform2f(ul('res'),w,h);
+  gl.uniform2f(ul('vres'),vid.videoWidth || w, vid.videoHeight || h);
   gl.uniform1f(ul('cell'),4);
   gl.uniform1f(ul('nc'),CHARS.length);
   gl.uniform1f(ul('ex'),2.02);
